@@ -29,13 +29,13 @@ query_host_original = 'internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetw
 #This returns 2 NAPTR records, one of which only handles S5 so is excluded, the other does a simple A record lookup
 #and gets back two possible IPs to send the traffic to (10.1.1.1 and 10.7.15.1)
 
-# #Scenario 3
-# target = 'pgw'
-# interface = 's8'
-# protocol = 'gtp' 
-# query_host_original = 'internet2.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com'
-# #This returns 5 NAPTR records
-# #One option transforms into test_ims
+#Scenario 3
+target = 'pgw'
+interface = 's8'
+protocol = 'gtp' 
+query_host_original = 'mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com'
+#This returns 5 NAPTR records
+#One option transforms into test_ims
 
 
 
@@ -51,14 +51,15 @@ for rdata in answers:
     print("rdata.replacement: " + str(rdata.replacement))
     print("rdata.service: " + str(rdata.service))
 
-    #Check the Service returned is one we care about, if not bail out
+    #Check the Service returned is one we care about, if not skip this node as it's no good to us
     desired_service_string = 'x-3gpp-' + str(target) + ":x-" + str(interface) + "-" + str(protocol)
-    if desired_service_string != rdata.service.decode("utf-8"):
+    if desired_service_string in rdata.service.decode("utf-8"):
         print("This peer only handles     " + str(rdata.service.decode("utf-8")))
         print("This peer does not handle: " + str(desired_service_string))
         print("Excluding this peer due to not handling desired service")
         continue
 
+    #If a Regex Replaces is set on the DNS entry then evaluate it and apply it
     if len(rdata.regexp) !=0:
         print("\tRunning Regex")
         try:
@@ -69,23 +70,31 @@ for rdata in answers:
             print("\tInput is " + str(type(query_host_original)))
         except:
             print("Failed to parse Regex as per NAPTR Rules")
+        
+        #Run the Regex Transformation
         result = re.sub(
             regex_pattern, 
             regex_replace, 
             query_host_original
         )
+
+        #Only update the host if the value changed - If Regex changed nothing then we don't need to replace it
         if query_host_original != result:
             print("\tRegex transformed to: " + str(result))
             query_host = result
         else:
-            print("Regex transformation failed")
-    elif len(rdata.regexp) !=0:
+            print("Regex transformation failed to match / replace")
 
+    #Else if no Regex Replacement is set
+    else:
         print("\tNo Regex Replacement required")
-        if rdata.replacement != ".":
+        #If replacement value is not '.' then leave the value unchanged
+        if str(rdata.replacement) != ".":
             print("\tDoing straight replace")
             query_host = rdata.replacement
             print("\tHost replaced with: " + str(query_host))
+        else:
+            print("\tNo Static Replacement required")
 
     #Depending on the flags this changes the behavior we use
     if "A" == rdata.flags.decode("utf-8") or "" == rdata.flags.decode("utf-8"):
@@ -94,7 +103,7 @@ for rdata in answers:
     elif "S" == rdata.flags.decode("utf-8"):
         print("\tPerforming SRV-Record lookup on host " + str(query_host))
         lookup_type = "SRV"
-        print("\t\tI have not implimented this - Sorry")
+        print("\t\tI have not implemented this - Sorry")
         continue
     else:
         print("Invalid flags option set: " + str(rdata.flags))  
@@ -102,7 +111,7 @@ for rdata in answers:
     try:
         host_answers = dns.resolver.query(query_host, lookup_type)
     except:
-        print("\t\tDNS lookup failed - Domain does not exist")
+        print("\t\tDNS lookup failed - Domain '" + str(query_host) + "'does not exist")
         continue
     if lookup_type == "SRV":
         for srv_rdata in host_answers:
