@@ -3,9 +3,11 @@
 #include <string.h>
 #include <stdbool.h>
 
+
 enum { MAX_FLAGS_STR = 8, // TODO WHAT IS THE ACTUAL MAX?
        MAX_REGEX_STR = 128,
        MAX_SERVICE_STR = 128 };
+
 
 typedef struct {
     int order;
@@ -16,7 +18,49 @@ typedef struct {
     char replacement[NS_MAXDNAME];
 } naptr_resource_record;
 
-bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr) {
+
+static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr);
+static void parse_only_naptr_resource_records(ns_msg * const handle, int count);
+
+
+void resolve_apn(const char* dname) {
+    unsigned char answer[NS_PACKETSZ];
+    ns_msg handle;
+    int bytes_received;
+    int count;
+
+    // perform NAPTR lookup
+    bytes_received = res_query(dname, ns_c_in, ns_t_naptr, answer, sizeof(answer));
+
+    if (bytes_received <= 0) {
+        return;
+    }
+
+    // parse response and process NAPTR records
+    ns_initparse(answer, bytes_received, &handle);
+    count = ns_msg_count(handle, ns_s_an);
+
+    parse_only_naptr_resource_records(&handle, count); // todo all output array
+
+    printf("\n\nGot back %i results for query %s:\n", count, dname);
+
+}
+
+
+int main() {
+    const char* dname1 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
+    const char* dname2 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
+    const char* dname3 = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
+
+    resolve_apn(dname1);
+    resolve_apn(dname2);
+    resolve_apn(dname3);
+
+    return 0;
+}
+
+
+static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr) {
     bool success = false;
 
     if ((0 != buf) &&
@@ -67,27 +111,12 @@ bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, nap
     return success;
 }
 
-void foo(const char* dname) {
-    unsigned char answer[NS_PACKETSZ];
-    ns_msg handle;
-    ns_rr rr; // resource record
-    int bytes_received;
-    int count;
 
-    // perform NAPTR lookup
-    bytes_received = res_query(dname, ns_c_in, ns_t_naptr, answer, sizeof(answer));
-
-    if (bytes_received <= 0) {
-        return;
-    }
-
-    // parse response and process NAPTR records
-    ns_initparse(answer, bytes_received, &handle);
-    count = ns_msg_count(handle, ns_s_an);
-    printf("\n\nGot back %i results for query %s:\n", count, dname);
+static void parse_only_naptr_resource_records(ns_msg * const handle, int count) {
+    ns_rr rr;
 
     for (int i = 0; i < count; i++) {
-        ns_parserr(&handle, ns_s_an, i, &rr);
+        ns_parserr(handle, ns_s_an, i, &rr);
         if (ns_rr_type(rr) == ns_t_naptr) {
             naptr_resource_record nrr = {};
             parse_naptr_resource_record(&rr.rdata[0], rr.rdlength, &nrr);
@@ -101,17 +130,5 @@ void foo(const char* dname) {
             printf("replacement: '%s'\n",      nrr.replacement);
         }
     }
-}
 
-
-int main() {
-    const char* dname1 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    const char* dname2 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    const char* dname3 = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-
-    foo(dname1);
-    foo(dname2);
-    foo(dname3);
-
-    return 0;
 }
