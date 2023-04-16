@@ -16,8 +16,13 @@ import pprint
 
 
 
-def Resolve_APN(target, interface, protocol, apn, mnc, mcc):
-    query_host_original = str(apn) + '.apn.epc.mnc' + str(mnc).zfill(3) + '.mcc' + str(mnc).zfill(3) + '.3gppnetwork.org.nickvsnetworking.com'
+def Resolve_APN(target, interface, protocol, apn, mnc, mcc, domain_suffix='.3gppnetwork.org.nickvsnetworking.com'):
+    query_host_original = ''
+    if len(apn) == 0:
+        query_host_original = str(target) + '.epc.mnc' + str(mnc).zfill(3) + '.mcc' + str(mnc).zfill(3) + str(domain_suffix)
+    else:
+        query_host_original = str(apn) + '.apn.epc.mnc' + str(mnc).zfill(3) + '.mcc' + str(mnc).zfill(3) + str(domain_suffix)
+
     answers = dns.resolver.query(query_host_original, 'NAPTR')
     print("Got back " + str(len(answers)) + " results for query " + str(query_host_original))
     result_list = []
@@ -115,7 +120,7 @@ def Resolve_APN(target, interface, protocol, apn, mnc, mcc):
     return result_list
 
 
-IP_List = Resolve_APN(target='pgw', interface='s8', protocol='gtp', apn='internet', mnc='001', mcc='001')
+IP_List = Resolve_APN(target='pgw', interface='s8', protocol='gtp', apn='mms', mnc='001', mcc='001')
 pprint.pprint(IP_List)
 
 IP_List = Resolve_APN(target='pgw', interface='s5', protocol='gtp', apn='internet', mnc='001', mcc='001')
