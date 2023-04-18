@@ -57,48 +57,44 @@ naptr_resource_record * naptr_query(const char* dname) {
  * Bubble sorts result record list according to naptr (order,preference).
  * Returns head to sorted list.
  */
-naptr_resource_record * naptr_sort(naptr_resource_record *nrrs)
+naptr_resource_record * naptr_sort(naptr_resource_record **head)
 {
-	naptr_resource_record *p, *q, *r, *s, *temp, *start;
+    int swapped;
+    naptr_resource_record* current;
+    naptr_resource_record* temp;
 
-	/* r precedes p and s points to the node up to which comparisons
-         are to be made */
+    if (*head == NULL)
+        return NULL;
 
-	s = NULL;
+    do {
+        swapped = 0;
+        current = *head;
 
-	start = naptr_list_head(nrrs);
+        while (current->next != NULL) {
+            if (naptr_greater(current, current->next)) {
+                if (current == *head) {
+                    *head = current->next;
+                    (*head)->prev = NULL;
+                } else {
+                    current->prev->next = current->next;
+                    current->next->prev = current->prev;
+                }
 
-    if (NULL == start) return NULL;
+                temp = current->next->next;
+                current->next->next = current;
+                current->prev = current->next;
+                current->next = temp;
+                if (temp != NULL)
+                    temp->prev = current;
 
-	while(s != start->next) {
-		r = p = start;
-		q = p->next;
-		while(p != s) {
-			if(naptr_greater(p, q)) {
-				if(p == start) {
-					temp = q->next;
-					q->next = p;
-					p->next = temp;
-					start = q;
-					r = q;
-				} else {
-					temp = q->next;
-					q->next = p;
-					p->next = temp;
-					r->next = q;
-					r = q;
-				}
-			} else {
-				r = p;
-				p = p->next;
-			}
-			q = p->next;
-			if(q == s)
-				s = p;
+                swapped = 1;
+            } else {
+                current = current->next;
+            }
         }
-	}
+    } while (swapped);
 
-    return start;
+    return *head;
 }
 
 naptr_resource_record * naptr_list_head(naptr_resource_record * nrr) {
@@ -136,6 +132,18 @@ void naptr_free_resource_record_list(naptr_resource_record * nrr) {
         nrr = naptr_list_head(nrr);
         _naptr_free_resource_record_list(nrr);
     }
+}
+
+int naptr_resource_record_list_count(naptr_resource_record * nrr) {
+    int count = 0;
+
+    nrr = naptr_list_head(nrr);
+    while (NULL != nrr) {
+        ++count;
+        nrr = nrr->next;
+    }
+
+    return count;
 }
 
 /* Returns the head of a doubly linked list */

@@ -8,30 +8,21 @@
 #include <resolv.h>
 
 typedef struct {
-    char target[8];        // "pgw"
-    char interface[8];     // "s5"
-    char protocol[8];      // "gtp"
+    char target[8];         // "pgw"
+    char interface[8];      // "s5"
+    char protocol[8];       // "gtp"
     char apn[32];           // "mms"
-    char mnc[8];           // "001"
-    char mcc[8];           // "100"
+    char mnc[8];            // "001"
+    char mcc[8];            // "100"
     char domain_suffix[64]; // ".3gppnetwork.org.nickvsnetworking.com";
 } ResolverContext;
 
-static void print_mem(void* ptr, size_t sz);
 static bool build_domain_name(ResolverContext const * const context, char * const buf, size_t buf_sz);
 static naptr_resource_record * filter_nrrs(ResolverContext const * const context, naptr_resource_record *nrrs);
 static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr);
 static naptr_resource_record * get_best_nrr(naptr_resource_record *nrrs);
 static void transform_domain_name(naptr_resource_record *nrr, char * dname, size_t max_dname_sz);
 static int record_lookup(char lookup_type, char * dname, char * buf, size_t buf_sz);
-
-
-typedef struct a_resource_record {
-    struct a_resource_record* prev;
-    struct a_resource_record* next;
-
-    char ipv4[INET_ADDRSTRLEN];
-} a_resource_record;
 
 // todo remove
 static void print_nrr(naptr_resource_record *nrr) {
@@ -65,32 +56,36 @@ bool resolve(ResolverContext const * const context, char *buf, size_t buf_sz) {
 
     enum { MAX_DOMAIN_NAME_STR_LEN = 666 };
     char dname[MAX_DOMAIN_NAME_STR_LEN] = "";
-    naptr_resource_record *nrrs = NULL;
+    naptr_resource_record *nrr_list = NULL;
+    naptr_resource_record *nrr = NULL;
 
     /* Build domain name */
     build_domain_name(context, dname, MAX_DOMAIN_NAME_STR_LEN);
 
     /* Get all NRRs */
-    nrrs = naptr_query(dname);
-    if (NULL == nrrs) return false;
+    nrr_list = naptr_query(dname);
+    if (NULL == nrr_list) return false;
 
-    /* Filter nrrs */
-    nrrs = filter_nrrs(context, nrrs);
+    /* Remove all the NRRs that don't provide the desired service */
+    nrr_list = filter_nrrs(context, nrr_list);
 
-    /* Sort the NRRs */
-    nrrs = naptr_sort(nrrs);
+    /* Sort the NRRs so that we can resolve them in order of priority */
+    nrr_list = naptr_list_head(nrr_list);
+    nrr = naptr_sort(&nrr_list);
 
-    while (nrrs != NULL) {
+    while (nrr != NULL) {
         /* Update domain name */
-        transform_domain_name(nrrs, dname, MAX_DOMAIN_NAME_STR_LEN);
+        transform_domain_name(nrr, dname, MAX_DOMAIN_NAME_STR_LEN);
 
         /* Go through the NRRs until we get an IP */
-        int num_ips = record_lookup(nrrs->flag, dname, buf, buf_sz);
+        int num_ips = record_lookup(nrr->flag, dname, buf, buf_sz);
 
         if (0 < num_ips) break;
 
-        nrrs = nrrs->next;
+        nrr = nrr->next;
     }
+
+    naptr_free_resource_record_list(nrr_list);
 
     return resolved;
 }
@@ -174,13 +169,6 @@ int main() {
 }
 
 
-static void print_mem(void* ptr, size_t sz) {
-    for (int i = 0; i < sz; ++i) {
-        printf("%02X ", *(((uint8_t*)ptr) + i));
-    }
-    printf("\n");
-}
-
 static bool build_domain_name(ResolverContext const * const context, char * const buf, size_t buf_sz) {
     bool build_success = false;
     int chars_written = 0;
@@ -258,13 +246,6 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
     }
 
     return should_remove;
-}
-
-static naptr_resource_record * get_best_nrr(naptr_resource_record *nrrs) {
-
-    /* At some point going to need to implement random
-     * selection if records have same oder and preference */
-    return naptr_sort(nrrs);
 }
 
 static void transform_domain_name(naptr_resource_record *nrr, char * dname, size_t max_dname_sz) {

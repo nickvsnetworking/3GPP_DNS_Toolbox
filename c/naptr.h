@@ -25,12 +25,14 @@ typedef struct naptr_resource_record {
 
 naptr_resource_record * naptr_query(const char* dname);
 
-naptr_resource_record * naptr_sort(naptr_resource_record *nrrs);
+naptr_resource_record * naptr_sort(naptr_resource_record **head);
 
 naptr_resource_record * naptr_list_head(naptr_resource_record * nrr);
 
 void naptr_remove_resource_record(naptr_resource_record * nrr);
 
 void naptr_free_resource_record_list(naptr_resource_record * nrr);
+
+int naptr_resource_record_list_count(naptr_resource_record * nrr);
 
 #endif /* NAPTR_H */
