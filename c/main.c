@@ -6,6 +6,8 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <resolv.h>
+#include <ctype.h>
+
 
 typedef struct {
     char target[8];         // "pgw"
@@ -47,6 +49,131 @@ static void print_nrrs(naptr_resource_record *nrrs) {
         nrrs = nrrs->next;
     }
 }
+
+#define SR_RE_MAX_MATCH 6
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*! \brief Replace in replacement tokens \\d with substrings of string pointed by
+ * pmatch.
+ */
+int replace(regmatch_t* pmatch, char* string, char* replacement, char* result)
+{
+	int len, i, j, digit, size;
+
+    int rlen = 200;
+
+	len = strlen(replacement);
+	j = 0;
+
+	for (i = 0; i < len; i++) {
+		if (replacement[i] == '\\') {
+            printf("passed first challange\n");
+			if (i < len - 1) {
+				if (isdigit((unsigned char)replacement[i+1])) {
+					digit = replacement[i+1] - '0';
+					if (pmatch[digit].rm_so != -1) {
+						size = pmatch[digit].rm_eo - pmatch[digit].rm_so;
+						if (j + size < rlen) {
+							memcpy(&(result[j]), string+pmatch[digit].rm_so, size);
+							j = j + size;
+						} else {
+							return -1;
+						}
+					} else {
+						return -2;
+					}
+					i = i + 1;
+					continue;
+				} else {
+					i = i + 1;
+				}
+			} else {
+				return -3;
+			}
+		}
+
+		if (j + 1 < rlen) {
+			result[j] = replacement[i];
+			j = j + 1;
+		} else {
+			return -4;
+		}
+	}
+	// strlen(result) = j;
+	return 1;
+}
+
+/*! \brief Match pattern against string and store result in pmatch */
+static int reg_match(char *pattern, char *string, regmatch_t *pmatch)
+{
+	regex_t preg;
+
+	if (regcomp(&preg, pattern, REG_EXTENDED | REG_NEWLINE)) {
+		return -1;
+	}
+	if (preg.re_nsub > SR_RE_MAX_MATCH) {
+		regfree(&preg);
+		return -2;
+	}
+	if (regexec(&preg, string, SR_RE_MAX_MATCH, pmatch, 0)) {
+		regfree(&preg);
+		return -3;
+	}
+	regfree(&preg);
+	return 0;
+}
+
+
+/*! \brief Match pattern against string and, if match succeeds, and replace string
+ * with replacement substituting tokens \\d with matched substrings.
+ */
+static int reg_replace(char *pattern, char *replacement, char *string, char *result)
+{
+	regmatch_t pmatch[SR_RE_MAX_MATCH];
+
+	if (reg_match(pattern, string, &(pmatch[0]))) {
+		return -1;
+	}
+
+	return replace(&pmatch[0], string, replacement, result);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* Takes in a context and returns an ip? */
 bool resolve(ResolverContext const * const context, char *buf, size_t buf_sz) {
@@ -149,21 +276,40 @@ int main() {
 
     char ipv4[INET_ADDRSTRLEN] = "";
 
-    resolve(&context0, ipv4, INET_ADDRSTRLEN);
-    printf("========================================\n");
-    printf("The the final resolved IP is '%s'\n", ipv4);
-    resolve(&context1, ipv4, INET_ADDRSTRLEN);
-    printf("========================================\n");
-    printf("The the final resolved IP is '%s'\n", ipv4);
-    resolve(&context2, ipv4, INET_ADDRSTRLEN);
-    printf("========================================\n");
-    printf("The the final resolved IP is '%s'\n", ipv4);
-    resolve(&context3, ipv4, INET_ADDRSTRLEN);
-    printf("========================================\n");
-    printf("The the final resolved IP is '%s'\n", ipv4);
-    resolve(&context4, ipv4, INET_ADDRSTRLEN);
-    printf("========================================\n");
-    printf("The the final resolved IP is '%s'\n", ipv4);
+    // resolve(&context0, ipv4, INET_ADDRSTRLEN);
+    // printf("========================================\n");
+    // printf("The the final resolved IP is '%s'\n", ipv4);
+    // resolve(&context1, ipv4, INET_ADDRSTRLEN);
+    // printf("========================================\n");
+    // printf("The the final resolved IP is '%s'\n", ipv4);
+    // resolve(&context2, ipv4, INET_ADDRSTRLEN);
+    // printf("========================================\n");
+    // printf("The the final resolved IP is '%s'\n", ipv4);
+    // resolve(&context3, ipv4, INET_ADDRSTRLEN);
+    // printf("========================================\n");
+    // printf("The the final resolved IP is '%s'\n", ipv4);
+    // resolve(&context4, ipv4, INET_ADDRSTRLEN);
+    // printf("========================================\n");
+    // printf("The the final resolved IP is '%s'\n", ipv4);
+
+
+    naptr_resource_record nrr = {
+        .regex_pattern = "([a-z0-9]+)(..*)",
+        .regex_replace = "\\1.apn.epc.mnc999.mcc999.3gppnetwork.org",
+        .replacement = ".",
+    };
+    char dname[200] = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
+
+    // naptr_resource_record nrr = {
+    //     .regex_pattern = "fox",
+    //     .regex_replace = "\\cat",
+    //     .replacement = ".",
+    // };
+    // char dname[200] = "The quick brown fox jumps over the lazy dog";
+
+    transform_domain_name(&nrr, dname, 200);
+    printf("Regex was transformed to       : '%s'\n", dname);
+    printf("Regex should be transformed to : 'mms.apn.epc.mnc999.mcc999.3gppnetwork.org'\n");
 
     return 0;
 }
@@ -257,6 +403,14 @@ static void transform_domain_name(naptr_resource_record *nrr, char * dname, size
         printf("\tRunning Regex\n");
         printf("\tregex_pattern is %s\n", nrr->regex_pattern);
         printf("\tregex_replace is %s\n", nrr->regex_replace);
+
+        char res[200] = "";
+
+        int r = reg_replace(nrr->regex_pattern, nrr->regex_replace, dname, res);
+
+        printf("res value : %d\n", r);
+
+        strcpy(dname, res);
 
         // todo fix this so we can actually do regex substitutes
         // substitute(dname, regex_pattern, regex_replace, output);
