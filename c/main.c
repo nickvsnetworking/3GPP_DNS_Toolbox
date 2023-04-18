@@ -1,4 +1,5 @@
 #include <arpa/nameser.h>
+#include <arpa/inet.h>
 #include <resolv.h>
 #include <string.h>
 #include <stdbool.h>
@@ -28,7 +29,7 @@ typedef struct {
 } ResolverContext;
 
 typedef struct naptr_resource_record {
-    struct naptr_resource_record* head;
+    struct naptr_resource_record* prev;
     struct naptr_resource_record* next;
 
     int og_val;
@@ -40,13 +41,22 @@ typedef struct naptr_resource_record {
     char replacement[MAX_REPLACEMENT_STR];
 } naptr_resource_record;
 
+typedef struct a_resource_record {
+    struct a_resource_record* prev;
+    struct a_resource_record* next;
+
+    int order;
+    int preference;
+    char ipv4[INET_ADDRSTRLEN];
+} a_resource_record;
 
 static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr);
 static int parse_only_naptr_resource_records(ns_msg * const handle, int count, naptr_resource_record * const out_buf, size_t out_buf_sz);
-static int dns_naptr_lookup(const char* dname);
 
 static naptr_resource_record * parse_naptr_resource_records(ns_msg * const handle, int count);
-
+static naptr_resource_record * dns_naptr_query(const char* dname);
+static naptr_resource_record * get_list_head(naptr_resource_record * nrr);
+static void remove_naptr_resource_record_list_item(naptr_resource_record * nrr);
 
 
 static void print_mem(void* ptr, size_t sz) {
@@ -88,8 +98,9 @@ static inline int naptr_greater(naptr_resource_record *na, naptr_resource_record
 
 /*
  * Bubble sorts result record list according to naptr (order,preference).
+ * Returns head to sorted list.
  */
-static inline void naptr_sort(naptr_resource_record **head)
+static inline naptr_resource_record * naptr_sort(naptr_resource_record *head)
 {
 	naptr_resource_record *p, *q, *r, *s, *temp, *start;
 
@@ -97,7 +108,10 @@ static inline void naptr_sort(naptr_resource_record **head)
          are to be made */
 
 	s = NULL;
-	start = *head;
+	start = head;
+
+    if (NULL == start) return NULL;
+
 	while(s != start->next) {
 		r = p = start;
 		q = p->next;
@@ -125,22 +139,33 @@ static inline void naptr_sort(naptr_resource_record **head)
 				s = p;
         }
 	}
-	*head = start;
-    (*head)->head = start;
+	head = start;
+
+    return head;
 }
 
 
 
 
+static void print_nrr(naptr_resource_record *nrr) {
+    printf("nrr->preference: %i\n",   nrr->preference);
+    printf("nrr->order: %i\n",        nrr->order);
+    printf("nrr->flag: '%c'\n",      nrr->flag);
+    printf("nrr->service: '%s'\n",    nrr->service);
+    printf("nrr->regex: '%s'\n",     nrr->regex);
+    printf("nrr->replacement: '%s'\n",     nrr->replacement);
+}
 
+void print_nrrs(naptr_resource_record *nrrs) {
+    int i = 0;
 
-void print_nrr(naptr_resource_record *nrr) {
-    printf("\nResult:\n");
-    printf("rdata.preference: %i\n",   nrr->preference);
-    printf("rdata.order: %i\n",        nrr->order);
-    printf("rdata.flags: '%c'\n",      nrr->flag);
-    printf("rdata.service: '%s'\n",    nrr->service);
-    printf("rdata.regexp: '%s'\n",     nrr->regex);
+    while (NULL != nrrs) {
+        printf("\nResult %i:\n", i);
+        print_nrr(nrrs);
+
+        ++i;
+        nrrs = nrrs->next;
+    }
 }
 
 
@@ -301,7 +326,7 @@ static void sus_nrr(naptr_resource_record *nrr, char const * const dname, char c
     naptr_resource_record nrr_buf[NRR_BUF_SZ] = {};
     int elements_consumed = 0;
 
-    elements_consumed += dns_naptr_lookup(query_host);
+    // elements_consumed += dns_naptr_lookup(query_host);
 
     for (int i = 0; i < elements_consumed; ++i) {
         printf("\nResult[%i]:\n", i);
@@ -318,144 +343,305 @@ static void sus_nrr(naptr_resource_record *nrr, char const * const dname, char c
 
 }
 
-/* Takes in a context and returns an ip? */
-void resolve_apn(char const * const target, char const * const interface, char const * const protocol, char const * const apn, char const * const mnc, char const * const mcc) {
-    enum { NRR_BUF_SZ = 16 };
-    naptr_resource_record nrr_buf[NRR_BUF_SZ] = {};
+static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool should_remove = false;
 
-    // build_domain_name(apn, mnc);
-    const char* dname2 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    int elements_consumed = dns_naptr_lookup(dname2);
+    enum { DESIRED_STR_LEN = 128 };
+    char desired_target_string[DESIRED_STR_LEN] = "";
+    char desired_service_string[DESIRED_STR_LEN] = "";
 
-    for (int i = 0; i < elements_consumed; ++i) {
-        sus_nrr(&nrr_buf[i], dname2, target, interface, protocol);
+    /* Build the strings */
+    snprintf(desired_target_string, DESIRED_STR_LEN, "x-3gpp-%s", context->target);
+    snprintf(desired_service_string, DESIRED_STR_LEN, "x-%s-%s", context->interface, context->protocol);
+
+    printf("desired_target_string  : '%s'\n", desired_target_string);
+    printf("actual_target_string   : '%s'\n", nrr->service);
+    printf("desired_service_string : '%s'\n", desired_service_string);
+    printf("actual_service_string  : '%s'\n", nrr->service);
+
+    if ((0 != strstr(nrr->service, desired_service_string)) &&
+        (0 != strstr(nrr->service, desired_target_string))) {
+        /* Found! */
+        printf("\tThis peer provides requested target node & service\n");
+    }
+    else {
+        printf("\tThis peer only handles     %s\n", nrr->service);
+        printf("\tThis peer does not target: %s / %s\n", desired_target_string, desired_service_string);
+        printf("\tExcluding this peer due to not handling desired service\n");
+        should_remove = true;
+    }
+
+    return should_remove;
+}
+
+/* Dangerous function,  */
+static naptr_resource_record * filter_nrrs(ResolverContext const * const context, naptr_resource_record **nrrs) {
+    naptr_resource_record *nrr = get_list_head(*nrrs);
+    naptr_resource_record *next = nrr->next;
+    naptr_resource_record *prev = nrr->prev;
+
+    while (NULL != nrr) {
+        next = nrr->next;
+        prev = nrr->prev;
+
+        printf("\n");
+        print_nrr(nrr);
+        
+        if (should_remove(context, nrr)) {
+            remove_naptr_resource_record_list_item(nrr); // only this function knows what is safe and what isn't
+        }
+        nrr = next;
+    }
+
+    return get_list_head(prev); // todo this should return the head
+}
+
+static naptr_resource_record * get_best_nrr(naptr_resource_record *nrrs) {
+    nrrs = get_list_head(nrrs);
+
+    /* At some point going to need to implement random
+     * selection if records have same oder and preference */
+    return naptr_sort(nrrs);
+}
+
+/* 
+
+    if ('A' == nrr->flag) {
+
+    } else if ('A' == nrr->flag) {
+
+    } else {
+        printf("Unsupported flag option for record lookup '%c'\n", nrr->flag);
+    }
+
+
+ */
+
+static void transform_domain_name(naptr_resource_record *nrr, char * dname, size_t max_dname_sz) {
+    if ((NULL == nrr) || (NULL == dname)) return;
+
+    /* If a Regex Replaces is set on the DNS entry then evaluate it and apply it */
+    if (0 < strlen(nrr->regex)) {
+        printf("\tRunning Regex\n");
+        enum { MAX_REGEX_PATTERN_SZ = 128 };
+        char regex_pattern[MAX_REGEX_PATTERN_SZ] = "";
+        char regex_replace[MAX_REGEX_PATTERN_SZ] = "";
+        
+        get_regex_pattern(nrr->regex, regex_pattern, MAX_REGEX_PATTERN_SZ, regex_replace, MAX_REGEX_PATTERN_SZ);
+
+        printf("\tregex_pattern is %s\n", regex_pattern);
+        printf("\tregex_replace is %s\n", regex_replace);
+
+        // todo fix this so we can actually do regex substitutes
+        // substitute(dname, regex_pattern, regex_replace, output);
+    } else if (0 != strcmp(nrr->replacement, ".")) {
+        printf("\tDoing straight replace\n");
+        printf("\tHost replaced with: %s\n", nrr->replacement);
+        strncpy(dname, nrr->replacement, max_dname_sz);
+    } else {
+        printf("\nNo changes made to domain name\n");
     }
 }
 
-/* Returns a linked list of all the  */
-static int dns_naptr_lookup(const char* dname) {
+static void record_lookup(char lookup_type, char * dname) {
+    int resolv_lookup_type; 
+    ns_msg handle;
+    ns_rr record;
+    unsigned char response[NS_PACKETSZ];
+
+    if ('A' == lookup_type) {
+        resolv_lookup_type = T_A; 
+    } else if ('S' == lookup_type) {
+        resolv_lookup_type = T_SRV; 
+    } else {
+        printf("Unsupported lookup type");
+        return;
+    }
+
+    int response_length, i, result;
+
+    // Send DNS query for A record type
+    response_length = res_query(dname, C_IN, resolv_lookup_type, response, NS_PACKETSZ);
+    printf("response_length: %i\n", response_length);
+    if (response_length < 0) {
+        perror("res_query");
+        return;
+    }
+
+    // Initialize message handle
+    result = ns_initparse(response, response_length, &handle);
+    if (result < 0) {
+        perror("ns_initparse");
+        return;
+    }
+
+    printf("ns_msg_count(handle, ns_s_an) = %i\n", ns_msg_count(handle, ns_s_an));
+    // Extract and print A records
+    for (i = 0; i < ns_msg_count(handle, ns_s_an); i++) {
+        result = ns_parserr(&handle, ns_s_an, i, &record);
+        if (result < 0) {
+            perror("ns_parserr");
+            return;
+        }
+
+        if (ns_rr_type(record) == T_A) {
+            char ip_address[INET_ADDRSTRLEN];
+            a_resource_record arr = {};
+            inet_ntop(AF_INET, ns_rr_rdata(record), arr.ipv4, INET_ADDRSTRLEN);
+            arr.order = ns_get16(ns_rr_rdata(record));
+            arr.preference = ns_get16(ns_rr_rdata(record) + 2);
+            printf("Result\n");
+            printf("arr.order      : %i\n", arr.order + 2);
+            printf("arr.preference : %i\n", arr.preference);
+            printf("arr.ipv4       : '%s'\n", arr.ipv4);
+
+        }
+    }
+
+}
+
+
+/* Takes in a context and returns an ip? */
+void resolve(ResolverContext const * const context) {
+    enum { MAX_DOMAIN_NAME_STR_LEN = 666 };
+    char dname[MAX_DOMAIN_NAME_STR_LEN] = "";
+    naptr_resource_record *nrrs = NULL;
+
+    /* Build domain name */
+    printf("\n---=== Build domain name ===---\n");
+    build_domain_name(context, dname, MAX_DOMAIN_NAME_STR_LEN);
+    printf("dname: '%s'\n", dname);
+
+    /* Get all NRRs */
+    printf("\n---=== Get NRRs ===---\n");
+    nrrs = dns_naptr_query(dname);
+    if (NULL == nrrs) return;
+    print_nrrs(nrrs);
+
+    /* Filter nrrs */
+    printf("\n---=== Filter NRRs ===---\n");
+    nrrs = filter_nrrs(context, &nrrs);
+    print_nrrs(nrrs);
+
+    /* Get the best nrr */
+    printf("\n---=== Get best nrr ===---\n");
+    nrrs = get_best_nrr(nrrs);
+    print_nrr(nrrs);
+
+    /* Update domain name */ // regex / replace / nothing
+    // transform_domain_name(nrrs, dname, MAX_DOMAIN_NAME_STR_LEN);
+
+    /* Lookup new host */
+    while (nrrs != NULL) {
+        transform_domain_name(nrrs, dname, MAX_DOMAIN_NAME_STR_LEN);
+        record_lookup(nrrs->flag, dname);
+        nrrs = nrrs->next;
+    }
+
+
+    /* Get the best one */
+    // new_nrrs = get_best_nrr(new_nrrs);
+
+    /* Return the IP address of the best one */
+    // return "ip address";
+}
+
+static naptr_resource_record * dns_naptr_query(const char* dname) {
     unsigned char answer[NS_PACKETSZ*2];
     ns_msg handle;
     int bytes_received;
     int count;
     int num_nrrs;
+    naptr_resource_record *nrrs;
 
-    naptr_resource_record *head;
-    naptr_resource_record *current;
 
     /* Perform NAPTR lookup */
     /* NAPTR records serialised in buffer  */
     bytes_received = res_query(dname, ns_c_in, ns_t_naptr, answer, sizeof(answer));
     if (bytes_received <= 0) {
-        printf("\nWe didnt get no bytes back :(\n");
-        printf("Query: '%s'\n", dname);
+        printf("Query failed: '%s'\n", dname);
         return 0;
     }
-
-    printf("Got a total of %i bytes\n", bytes_received);
-    print_mem(&answer, bytes_received);
 
     /* Parse response and process NAPTR records */
     /* NAPTR records in handler */
     ns_initparse(answer, bytes_received, &handle);
     count = ns_msg_count(handle, ns_s_an);
-    printf("We ended up getting %i message back from '%s'\n", count, dname);
 
     /* NAPTR records in linked list */
-    current = parse_naptr_resource_records(&handle, count);
+    nrrs = parse_naptr_resource_records(&handle, count);
 
-    if (NULL == current) {
+    if (NULL == nrrs) {
         printf("Failed to parse any answers!\n");
         return 0;
     }
 
-
-
-    head = current->head;
-
-    printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    printf("Presorted\n");
-    printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    int i = 0;
-    while (current != NULL) {
-        current->og_val = i;
-        ++i;
-        print_nrr(current);
-        current = current->next;
-    }
-
-    printf("\n\n\n\n");
-    current = head;
-    naptr_sort(&current);
-
-    printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-    printf("sorted\n");
-    printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-    i = 0;
-    while (current != NULL) {
-        print_nrr(current);
-        printf("Current index in list : %i\n", i);
-        printf("Original index in list: %i\n", current->og_val);
-        
-        ++i;
-        current = current->next;
-    }
-
-
-    return num_nrrs;
+    return nrrs;
 }
 
 
 int main() {
-    // const char* dname1 = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    // const char* dname1 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    // const char* dname2 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    // const char* dname3 = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
+    ResolverContext context0 = {
+        .apn = "mms",
+        .mnc = "001",
+        .mcc = "001",
+        .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
+        
+        .protocol = "gtp",
+        .target = "pgw",
+        .interface = "s5",
+    };
 
-    // elements_consumed += dns_naptr_lookup(dname1, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
-    // elements_consumed += dns_naptr_lookup(dname2, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
-    // elements_consumed += dns_naptr_lookup(dname3, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
+    ResolverContext context1 = {
+        .apn = "internet",
+        .mnc = "001",
+        .mcc = "001",
+        .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
+        
+        .protocol = "gtp",
+        .target = "pgw",
+        .interface = "s5",
+    };
 
-    // for (int i = 0; i < elements_consumed; ++i) {
-    //     printf("\nResult[%i]:\n", i);
-    //     printf("rdata.order: %i\n",        nrr_buf[i].order);
-    //     printf("rdata.preference: %i\n",   nrr_buf[i].preference);
-    //     printf("rdata.flags: '%c'\n",      nrr_buf[i].flag);
-    //     printf("rdata.service: '%s'\n",    nrr_buf[i].service);
-    //     printf("rdata.regexp: '%s'\n",     nrr_buf[i].regex);
-    //     printf("replacement: '%s'\n",      nrr_buf[i].replacement);
-    //     if (exclude_naptr_resource_record(nrr_buf[i].service, "pgw", "s8", "gtp"))
-    //         continue;
-    //     sus_nrr(&nrr_buf[i], dname1, "pgw", "s8", "handlegtp");
-    // // printf("\n\n");
-    // }
+    ResolverContext context3 = {
+        .apn = "mms",
+        .mnc = "001",
+        .mcc = "001",
+        .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
+        
+        .protocol = "gtp",
+        .target = "pgw",
+        .interface = "s5",
+    };
+
+    ResolverContext context2 = {
+        .apn = "internet",
+        .mnc = "001",
+        .mcc = "001",
+        .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
+        
+        .protocol = "gtp",
+        .target = "pgw",
+        .interface = "s5",
+    };
 
 
-    // ResolverContext ctx = {
-    //     .apn = "mms",
-    //     .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
-    //     .interface = "s8",
-    //     .mcc = "001",
-    //     .mnc = "001",
-    //     .protocol = "gpt",
-    //     .target = "pgw",
-    // };
+    ResolverContext context4 = {
+        .apn = "internet",
+        .mnc = "002",
+        .mcc = "002",
+        .domain_suffix = "3gppnetwork.org.nickvsnetworking.com",
+        
+        .protocol = "gtp",
+        .target = "pgw",
+        .interface = "s5",
+    };
 
-    // char buf[66] = "";
-    // build_domain_name(&ctx, buf, 66);
-
-    // printf("'%s'\n", buf);
-    
-    const char* dname1 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    const char* dname2 = "internet.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    const char* dname3 = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com";
-    const char* dname4 = "internet.apn.epc.mnc002.mcc002.3gppnetwork.org.nickvsnetworking.com";
-
-    // dns_naptr_lookup(dname1, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
-    // dns_naptr_lookup(dname2, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
-    // dns_naptr_lookup(dname3, &nrr_buf[elements_consumed], NRR_BUF_SZ - elements_consumed);
-    dns_naptr_lookup(dname4);
-
+    resolve(&context0);
+    // resolve(&context1);
+    // resolve(&context2);
+    // resolve(&context3);
+    // resolve(&context4);
 
     return 0;
 }
@@ -535,78 +721,94 @@ static int parse_only_naptr_resource_records(ns_msg * const handle, int count, n
     return num_nrrs;
 }
 
+/* Returns the head of a doubly linked list */
 static naptr_resource_record * parse_naptr_resource_records(ns_msg * const handle, int count) {
     ns_rr rr;
     int num_nrrs = 0;
-    naptr_resource_record * nrr_head = NULL;
     naptr_resource_record * nrr_current = NULL;
-    naptr_resource_record * nrr_previous = NULL;
+    naptr_resource_record * nrr_next = NULL;
 
     if (0 == handle) {
         return NULL;
     }
 
     for (int i = 0; i < count; i++) {
-        printf("parsing\n");
         ns_parserr(handle, ns_s_an, i, &rr);
-        printf("checking if naptr: %i\n", ns_rr_type(rr));
         if (ns_rr_type(rr) == ns_t_naptr) {
             /* Make memory for new nrr */
             nrr_current = (naptr_resource_record*)malloc(sizeof(naptr_resource_record));
             if (NULL == nrr_current) {
-                
                 printf("Critical failure... Could not allocate memory\n");
-                /*  */
                 exit(-1);
             }
             memset(nrr_current, 0, sizeof(naptr_resource_record));
 
-            /* Set the nrr data */
+            /* Set the current NRRs data */
             parse_naptr_resource_record(&rr.rdata[0], rr.rdlength, nrr_current);
 
-            printf("nrr_current->preference : %i\n", nrr_current->preference);
-            printf("nrr_current->order      : %i\n", nrr_current->order);
-
-            /* If the head doesn't exist then this is the head */
-            if (NULL == nrr_head) {
-                nrr_head = nrr_current;
+            /* This NRR will be added to the start of the list,
+             * meaning that the next NRR will be the one we created
+             * in the previous iteration. */
+            if (NULL != nrr_next) {
+                nrr_current->next = nrr_next;
+                nrr_next->prev = nrr_current;
             }
 
-            /* Link the NRR to the previous nrr */
-            if (NULL != nrr_previous) {
-                nrr_previous->next = nrr_current;
-            }
+            /* The previous NRR doesn't exist yet */
+            nrr_current->prev = NULL;
 
-            /* The current NRR does not have a next yet */
-            nrr_current->next = NULL;
-            
-            /* Link the NRR to the head nrr */
-            nrr_current->head = nrr_head;
-
-            /* Now this NRR is the previous nrr */
-            nrr_previous = nrr_current;
+            /* Now this NRR will be the next for the NRR created in the
+             * following iteration */
+            nrr_next = nrr_current;
         }
     }
 
-    return nrr_head;
+    return get_list_head(nrr_current);
 }
 
+static naptr_resource_record * get_list_head(naptr_resource_record * nrr) {
 
+    if (NULL == nrr) {
+        return NULL;
+    }
 
-static void _free_naptr_resource_records(naptr_resource_record * nrr) {
+    while (NULL != nrr->prev) {
+        nrr = nrr->prev;
+    }
+
+    return nrr;
+}
+
+static void remove_naptr_resource_record_list_item(naptr_resource_record * nrr) {
+    
+    naptr_resource_record *prev = nrr->prev;
+    naptr_resource_record *next = nrr->next;
+
+    if (NULL != prev) {
+        prev->next = next;
+    }
+
+    if (NULL != next) {
+        next->prev = prev;
+    }
+
+    free(nrr);
+}
+
+static void _free_naptr_resource_record_list(naptr_resource_record * nrr) {
     if (NULL != nrr) {
         /* Use the 'head' to free the 'tail' */
-        _free_naptr_resource_records(nrr->next);
+        _free_naptr_resource_record_list(nrr->next);
         
         /* Free the 'head' */
         free(nrr);
     }
 }
 
-static void free_naptr_resource_records(naptr_resource_record * nrr) {
+static void free_naptr_resource_record_list(naptr_resource_record * nrr) {
     if (NULL != nrr) {
         /* Make sure we start at the head */
-        nrr = nrr->head;
-        _free_naptr_resource_records(nrr);
+        nrr = get_list_head(nrr);
+        _free_naptr_resource_record_list(nrr);
     }
 }
