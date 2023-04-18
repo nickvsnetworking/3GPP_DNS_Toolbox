@@ -9,6 +9,10 @@
 #include <ctype.h>
 
 
+enum { MAX_DOMAIN_NAME_STR_LEN = 128,
+       SR_RE_MAX_MATCH = 6 };
+
+
 typedef struct {
     char target[8];         // "pgw"
     char interface[8];      // "s5"
@@ -50,7 +54,6 @@ static void print_nrrs(naptr_resource_record *nrrs) {
     }
 }
 
-#define SR_RE_MAX_MATCH 6
 
 
 
@@ -63,20 +66,15 @@ static void print_nrrs(naptr_resource_record *nrrs) {
 
 
 
-
-
-
-
+// todo move regex out so we can use it elsewhere
 
 
 /*! \brief Replace in replacement tokens \\d with substrings of string pointed by
  * pmatch.
  */
-int replace(regmatch_t* pmatch, char* string, char* replacement, char* result)
+int replace(regmatch_t* pmatch, char* string, char* replacement, char* buf, size_t buf_sz)
 {
 	int len, i, j, digit, size;
-
-    int rlen = 200;
 
 	len = strlen(replacement);
 	j = 0;
@@ -89,8 +87,8 @@ int replace(regmatch_t* pmatch, char* string, char* replacement, char* result)
 					digit = replacement[i+1] - '0';
 					if (pmatch[digit].rm_so != -1) {
 						size = pmatch[digit].rm_eo - pmatch[digit].rm_so;
-						if (j + size < rlen) {
-							memcpy(&(result[j]), string+pmatch[digit].rm_so, size);
+						if (j + size < buf_sz) {
+							memcpy(&(buf[j]), string+pmatch[digit].rm_so, size);
 							j = j + size;
 						} else {
 							return -1;
@@ -108,8 +106,8 @@ int replace(regmatch_t* pmatch, char* string, char* replacement, char* result)
 			}
 		}
 
-		if (j + 1 < rlen) {
-			result[j] = replacement[i];
+		if (j + 1 < buf_sz) {
+			buf[j] = replacement[i];
 			j = j + 1;
 		} else {
 			return -4;
@@ -143,7 +141,7 @@ static int reg_match(char *pattern, char *string, regmatch_t *pmatch)
 /*! \brief Match pattern against string and, if match succeeds, and replace string
  * with replacement substituting tokens \\d with matched substrings.
  */
-static int reg_replace(char *pattern, char *replacement, char *string, char *result)
+static int reg_replace(char *pattern, char *replacement, char *string, char *buf, size_t buf_sz)
 {
 	regmatch_t pmatch[SR_RE_MAX_MATCH];
 
@@ -151,7 +149,7 @@ static int reg_replace(char *pattern, char *replacement, char *string, char *res
 		return -1;
 	}
 
-	return replace(&pmatch[0], string, replacement, result);
+	return replace(&pmatch[0], string, replacement, buf, buf_sz);
 }
 
 
@@ -178,13 +176,11 @@ static int reg_replace(char *pattern, char *replacement, char *string, char *res
 /* Takes in a context and returns an ip? */
 bool resolve(ResolverContext const * const context, char *buf, size_t buf_sz) {
     bool resolved = false;
+    naptr_resource_record *nrr = NULL;
+    naptr_resource_record *nrr_list = NULL;
+    char dname[MAX_DOMAIN_NAME_STR_LEN] = "";
 
     if ((NULL == context) || (NULL == buf)) return false;
-
-    enum { MAX_DOMAIN_NAME_STR_LEN = 666 };
-    char dname[MAX_DOMAIN_NAME_STR_LEN] = "";
-    naptr_resource_record *nrr_list = NULL;
-    naptr_resource_record *nrr = NULL;
 
     /* Build domain name */
     build_domain_name(context, dname, MAX_DOMAIN_NAME_STR_LEN);
@@ -404,13 +400,10 @@ static void transform_domain_name(naptr_resource_record *nrr, char * dname, size
         printf("\tregex_pattern is %s\n", nrr->regex_pattern);
         printf("\tregex_replace is %s\n", nrr->regex_replace);
 
-        char res[200] = "";
+        char temp[MAX_DOMAIN_NAME_STR_LEN] = "";
 
-        int r = reg_replace(nrr->regex_pattern, nrr->regex_replace, dname, res);
-
-        printf("res value : %d\n", r);
-
-        strcpy(dname, res);
+        reg_replace(nrr->regex_pattern, nrr->regex_replace, dname, temp, MAX_DOMAIN_NAME_STR_LEN);
+        strcpy(dname, temp);
 
         // todo fix this so we can actually do regex substitutes
         // substitute(dname, regex_pattern, regex_replace, output);
