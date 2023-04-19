@@ -1,8 +1,11 @@
-main: main.o naptr.o regex_extensions.o
-	clang main.o naptr.o regex_extensions.o -lresolv -o main
+main: main.o naptr.o regex_extensions.o dns_resolvers.o
+	clang main.o naptr.o regex_extensions.o dns_resolvers.o -lresolv -o main
 
 main.o: main.c naptr.h
 	clang -c main.c
+
+dns_resolvers.o: dns_resolvers.c dns_resolvers.h
+	clang -c dns_resolvers.c
 
 naptr.o: naptr.c naptr.h
 	clang -c naptr.c
