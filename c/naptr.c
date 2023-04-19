@@ -12,6 +12,8 @@ enum { ORDER_SZ_BYTES = 2,
        SERVICE_LEN_SZ_BYTES = 1,
        REGEX_LEN_SZ_BYTES = 1 };
 
+enum { MAX_ANSWER_BYTES = 1024 };
+
 
 static naptr_resource_record * parse_naptr_resource_records(ns_msg * const handle, int count);
 static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr);
@@ -19,19 +21,20 @@ static void get_regex_pattern_replace(char * const regex_str, char * const regex
 static inline int naptr_greater(naptr_resource_record *na, naptr_resource_record *nb);
 static void _naptr_free_resource_record_list(naptr_resource_record * head);
 
-
+/* If dname is NULL then we will return NULL */
 naptr_resource_record * naptr_query(const char* dname) {
-    unsigned char answer[NS_PACKETSZ*2];
-    ns_msg handle;
-    int bytes_received;
     int count;
-    int num_nrrs;
+    int bytes_received;
+    unsigned char answer[MAX_ANSWER_BYTES];
+    ns_msg handle;
     naptr_resource_record *nrrs;
 
+    if (NULL == dname) return NULL;
 
     /* Perform NAPTR lookup */
     /* NAPTR records serialised in buffer  */
     bytes_received = res_query(dname, ns_c_in, ns_t_naptr, answer, sizeof(answer));
+    printf("[NAPTR-lookup] Query for '%s' resulted in %i bytes received\n", dname, bytes_received);
     if (bytes_received <= 0) {
         printf("Query failed: '%s'\n", dname);
         return 0;
@@ -57,14 +60,12 @@ naptr_resource_record * naptr_query(const char* dname) {
  * Bubble sorts result record list according to naptr (order,preference).
  * Returns head to sorted list.
  */
-naptr_resource_record * naptr_sort(naptr_resource_record **head)
-{
+naptr_resource_record * naptr_sort(naptr_resource_record **head) {
     int swapped;
     naptr_resource_record* current;
     naptr_resource_record* temp;
 
-    if (*head == NULL)
-        return NULL;
+    if (*head == NULL) return NULL;
 
     do {
         swapped = 0;
@@ -98,10 +99,7 @@ naptr_resource_record * naptr_sort(naptr_resource_record **head)
 }
 
 naptr_resource_record * naptr_list_head(naptr_resource_record * nrr) {
-
-    if (NULL == nrr) {
-        return NULL;
-    }
+    if (NULL == nrr) return NULL;
 
     while (NULL != nrr->prev) {
         nrr = nrr->prev;
@@ -111,7 +109,8 @@ naptr_resource_record * naptr_list_head(naptr_resource_record * nrr) {
 }
 
 void naptr_remove_resource_record(naptr_resource_record * nrr) {
-    
+    if (NULL == nrr) return;
+
     naptr_resource_record *prev = nrr->prev;
     naptr_resource_record *next = nrr->next;
 
@@ -137,6 +136,8 @@ void naptr_free_resource_record_list(naptr_resource_record * nrr) {
 int naptr_resource_record_list_count(naptr_resource_record * nrr) {
     int count = 0;
 
+    if (NULL == nrr) return 0;
+
     nrr = naptr_list_head(nrr);
     while (NULL != nrr) {
         ++count;
@@ -153,9 +154,7 @@ static naptr_resource_record * parse_naptr_resource_records(ns_msg * const handl
     naptr_resource_record * nrr_current = NULL;
     naptr_resource_record * nrr_next = NULL;
 
-    if (0 == handle) {
-        return NULL;
-    }
+    if ((NULL == handle) || (0 == count)) return NULL;
 
     for (int i = 0; i < count; i++) {
         ns_parserr(handle, ns_s_an, i, &rr);
@@ -194,55 +193,53 @@ static naptr_resource_record * parse_naptr_resource_records(ns_msg * const handl
 static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_sz, naptr_resource_record * const nrr) {
     bool success = false;
 
-    if ((0 != buf) &&
-        (0 != nrr))
-    {
-        /* Num of '!' chars is 3 */
-        enum { MAX_REGEX_STR = MAX_REGEX_PATTERN_STR + MAX_REGEX_REPLACE_STR + 3 };
-        int flags_len;
-        int service_len;
-        int regex_len;
-        size_t bytes_consumed = 0;
-        char regex[MAX_REGEX_STR] = "";
+    if ((0 == buf) || (0 == nrr)) return false;
 
-        nrr->order = ns_get16(&buf[bytes_consumed]);
-        bytes_consumed += ORDER_SZ_BYTES;
+    /* Num of '!' chars is 3 */
+    enum { MAX_REGEX_STR = MAX_REGEX_PATTERN_STR + MAX_REGEX_REPLACE_STR + 3 };
+    int flags_len;
+    int service_len;
+    int regex_len;
+    size_t bytes_consumed = 0;
+    char regex[MAX_REGEX_STR] = "";
 
-        nrr->preference = ns_get16(&buf[bytes_consumed]);
-        bytes_consumed += PREFERENCE_SZ_BYTES;
+    nrr->order = ns_get16(&buf[bytes_consumed]);
+    bytes_consumed += ORDER_SZ_BYTES;
 
-        flags_len = buf[bytes_consumed];
-        bytes_consumed += FLAGS_LEN_SZ_BYTES;
+    nrr->preference = ns_get16(&buf[bytes_consumed]);
+    bytes_consumed += PREFERENCE_SZ_BYTES;
 
-        /* Assuming that the flag(s) will only be either 'A' or 'S' */
-        nrr->flag = buf[bytes_consumed];
-        bytes_consumed += flags_len;
+    flags_len = buf[bytes_consumed];
+    bytes_consumed += FLAGS_LEN_SZ_BYTES;
 
-        service_len = buf[bytes_consumed];
-        bytes_consumed += SERVICE_LEN_SZ_BYTES;
+    /* Assuming that the flag(s) will only be either 'A' or 'S' */
+    nrr->flag = buf[bytes_consumed];
+    bytes_consumed += flags_len;
 
-        memcpy(nrr->service, &buf[bytes_consumed], service_len);
-        bytes_consumed += service_len;
+    service_len = buf[bytes_consumed];
+    bytes_consumed += SERVICE_LEN_SZ_BYTES;
 
-        regex_len = buf[bytes_consumed];
-        bytes_consumed += REGEX_LEN_SZ_BYTES;
+    memcpy(nrr->service, &buf[bytes_consumed], service_len);
+    bytes_consumed += service_len;
 
-        memcpy(regex, &buf[bytes_consumed], regex_len);
-        bytes_consumed += regex_len;
+    regex_len = buf[bytes_consumed];
+    bytes_consumed += REGEX_LEN_SZ_BYTES;
 
-        int bytes_uncompressed = ns_name_uncompress(
-            &buf[0],              /* Start of compressed buffer */
-            &buf[buf_sz],         /* End of compressed buffer */
-            &buf[bytes_consumed], /* Where to start decompressing */
-            nrr->replacement,     /* Where to store decompressed value */
-            MAX_REPLACEMENT_STR   /* Number of bytes that can be stored in output buffer */
-        );
+    memcpy(regex, &buf[bytes_consumed], regex_len);
+    bytes_consumed += regex_len;
 
-        get_regex_pattern_replace(regex, nrr->regex_pattern, MAX_REGEX_PATTERN_STR, nrr->regex_replace, MAX_REGEX_REPLACE_STR);
+    int bytes_uncompressed = ns_name_uncompress(
+        &buf[0],              /* Start of compressed buffer */
+        &buf[buf_sz],         /* End of compressed buffer */
+        &buf[bytes_consumed], /* Where to start decompressing */
+        nrr->replacement,     /* Where to store decompressed value */
+        MAX_REPLACEMENT_STR   /* Number of bytes that can be stored in output buffer */
+    );
 
-        if (0 <= bytes_uncompressed) {
-            success = true;
-        }        
+    get_regex_pattern_replace(regex, nrr->regex_pattern, MAX_REGEX_PATTERN_STR, nrr->regex_replace, MAX_REGEX_REPLACE_STR);
+
+    if (0 <= bytes_uncompressed) {
+        success = true;
     }
 
     return success;
@@ -262,8 +259,8 @@ static void get_regex_pattern_replace(char * const regex_str, char * const regex
     char* regex_replace_ptr = strtok(NULL, "!");
     if (NULL == regex_replace_ptr) return;
 
-    strncpy(regex_pattern, regex_pattern_ptr, max_regex_pattern_sz);
-    strncpy(regex_replace, regex_replace_ptr, max_regex_replace_sz);
+    strncpy(regex_pattern, regex_pattern_ptr, max_regex_pattern_sz - 1);
+    strncpy(regex_replace, regex_replace_ptr, max_regex_replace_sz - 1);
 }
 
 /*
@@ -272,18 +269,18 @@ static void get_regex_pattern_replace(char * const regex_str, char * const regex
  * valid one.  Valid NAPTR records are compared based on their
  * (order,preference).
  */
-static inline int naptr_greater(naptr_resource_record *na, naptr_resource_record *nb)
-{
-	if(na == 0)
-		return 1;
-
-	if(nb == 0)
-		return 0;
+static inline int naptr_greater(naptr_resource_record *na, naptr_resource_record *nb) {
+	if (NULL == na) {
+        return 1;
+    }
+	if (NULL == nb) {
+        return 0;
+    }
 
     if (na->preference > nb->preference) {
         return 1;
     } else if (na->preference == nb->preference) {
-        return na->order >= nb->order;
+        return na->order > nb->order;
     }
 
     return 0;

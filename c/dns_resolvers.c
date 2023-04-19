@@ -9,15 +9,16 @@
 #include "dns_resolvers.h"
 
 
-enum { MAX_DOMAIN_NAME_STR_LEN = 128 };
+enum { MAX_ANSWER_BYTES = 1024 };
 
 
-static bool build_domain_name(ResolverContext const * const context, char * const buf, size_t buf_sz);
+static bool build_domain_name(ResolverContext * const context);
 static naptr_resource_record * filter_nrrs(ResolverContext const * const context, naptr_resource_record *nrrs);
 static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr);
 static naptr_resource_record * get_best_nrr(naptr_resource_record *nrrs);
-static void transform_domain_name(naptr_resource_record *nrr, char * dname, size_t max_dname_sz);
-static int record_lookup(char lookup_type, char * dname, char * buf, size_t buf_sz);
+static void transform_domain_name(naptr_resource_record *nrr, char * dname);
+static int type_ip_query(char lookup_type, char * dname, char * buf, size_t buf_sz);
+
 
 // todo remove
 static void print_nrr(naptr_resource_record *nrr) {
@@ -44,19 +45,18 @@ static void print_nrrs(naptr_resource_record *nrrs) {
 }
 
 /* Takes in a context and returns an ip? */
-bool resolve_naptr(ResolverContext const * const context, char *buf, size_t buf_sz) {
+bool resolve_naptr(ResolverContext * const context, char *buf, size_t buf_sz) {
     bool resolved = false;
     naptr_resource_record *nrr = NULL;
     naptr_resource_record *nrr_list = NULL;
-    char dname[MAX_DOMAIN_NAME_STR_LEN] = "";
 
     if ((NULL == context) || (NULL == buf)) return false;
 
     /* Build domain name */
-    build_domain_name(context, dname, MAX_DOMAIN_NAME_STR_LEN);
+    build_domain_name(context);
 
     /* Get all NRRs */
-    nrr_list = naptr_query(dname);
+    nrr_list = naptr_query(context->_domain_name);
     if (NULL == nrr_list) return false;
 
     /* Remove all the NRRs that don't provide the desired service */
@@ -68,10 +68,10 @@ bool resolve_naptr(ResolverContext const * const context, char *buf, size_t buf_
 
     while (nrr != NULL) {
         /* Update domain name */
-        transform_domain_name(nrr, dname, MAX_DOMAIN_NAME_STR_LEN);
+        transform_domain_name(nrr, context->_domain_name);
 
         /* Go through the NRRs until we get an IP */
-        int num_ips = record_lookup(nrr->flag, dname, buf, buf_sz);
+        int num_ips = type_ip_query(nrr->flag, context->_domain_name, buf, buf_sz);
 
         if (0 < num_ips) break;
 
@@ -83,14 +83,17 @@ bool resolve_naptr(ResolverContext const * const context, char *buf, size_t buf_
     return resolved;
 }
 
-static bool build_domain_name(ResolverContext const * const context, char * const buf, size_t buf_sz) {
-    bool build_success = false;
+static bool build_domain_name(ResolverContext * const context) {
     int chars_written = 0;
+    bool build_success = false;
 
+    if (NULL == context) return false;
+
+    /* If we don't have an APN specified we use the target */
     if (0 == strlen(context->apn)) {
         chars_written = snprintf(
-            buf,
-            buf_sz,
+            context->_domain_name,
+            DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN,
             "%s.epc.mnc%s.mcc%s.%s", 
             context->target,
             context->mnc,
@@ -99,8 +102,8 @@ static bool build_domain_name(ResolverContext const * const context, char * cons
         );
     } else {
         chars_written = snprintf(
-            buf,
-            buf_sz,
+            context->_domain_name,
+            DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN,
             "%s.apn.epc.mnc%s.mcc%s.%s", 
             context->apn,
             context->mnc,
@@ -109,12 +112,20 @@ static bool build_domain_name(ResolverContext const * const context, char * cons
         );
     }
 
-    if (chars_written < buf_sz) {
+    if (chars_written < DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN) {
         build_success = true;
     }
 
     return build_success;
 }
+
+
+/* 
+squeezing into open5gs is still needed
+consult the standards for exclusions if regex is fucked
+SRV will need to be sorted and stuff
+
+ */
 
 // todo this needs a little work... itll probably bug out if we try filter with 1 element in the list
 static naptr_resource_record * filter_nrrs(ResolverContext const * const context, naptr_resource_record *nrr) {
@@ -129,6 +140,9 @@ static naptr_resource_record * filter_nrrs(ResolverContext const * const context
         next = nrr->next;
         prev = nrr->prev;
 
+        // if regex doesnt match then maybe remove it?
+        // 
+
         if (should_remove(context, nrr)) {
             naptr_remove_resource_record(nrr);
         }
@@ -138,62 +152,170 @@ static naptr_resource_record * filter_nrrs(ResolverContext const * const context
     return naptr_list_head(prev);
 }
 
-static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr) {
-    bool should_remove = false;
 
+/*
+ * RFC 2915 (4. The Basic NAPTR Algorithm)
+ * 
+ * NAPTR records for this key are retrieved, those with unknown Flags or
+ * inappropriate Services are discarded and the remaining records are
+ * sorted by their Order field.  Within each value of Order, the records
+ * are further sorted by the Preferences field.
+ * 
+ * The records are examined in sorted order until a matching record is
+ * found.  A record is considered a match iff:
+ *   - it has a Replacement field value instead of a Regexp field value.
+ *   - or the Regexp field matches the string held by the client.
+ * 
+ * TLDR:
+ *   We only keep if:
+ *     - Known flag
+ *     - Appropriate services
+ *     - It has a replacement field AND no regex field
+ *     - It has a regex field that does not match the string
+ * 
+ */
+
+
+static bool has_appropriate_services(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool has_appropriate_services = false;
     enum { DESIRED_STR_LEN = 128 };
     char desired_target_string[DESIRED_STR_LEN] = "";
     char desired_service_string[DESIRED_STR_LEN] = "";
 
-    /* Build the strings */
+    if ((NULL == context) || (NULL == nrr)) return NULL;
+
+    /* Build our desired services strings */
     snprintf(desired_target_string, DESIRED_STR_LEN, "x-3gpp-%s", context->target);
     snprintf(desired_service_string, DESIRED_STR_LEN, "x-%s-%s", context->interface, context->protocol);
 
-    if ((0 != strstr(nrr->service, desired_service_string)) &&
-        (0 != strstr(nrr->service, desired_target_string))) {
+    if ((NULL != strstr(nrr->service, desired_service_string)) ||
+        (NULL != strstr(nrr->service, desired_target_string))) {
+        has_appropriate_services = true;
+    }
+
+    return has_appropriate_services;
+}
+
+static bool has_replace_no_regex(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool has_replace_no_regex = false;
+
+    if ((NULL == context) || (NULL == nrr)) return NULL;
+
+    /* Has replacement field */
+
+    // printf("strlen(nrr->replacement) = %i\n", strlen(nrr->replacement));
+    // printf("strcmp(nrr->replacement, .) = %i\n", strcmp(nrr->replacement, "."));
+
+    if ((0 < strlen(nrr->replacement)) &&
+        (0 != strcmp(nrr->replacement, "."))) {
+
+        /* Has no regex fields */
+        if ((0 == strlen(nrr->regex_pattern)) &&
+            (0 == strlen(nrr->regex_pattern))) {
+            has_replace_no_regex = true;     
+        }
+    }
+
+    return has_replace_no_regex;
+}
+
+
+static bool has_regex_match(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool has_regex_match = false;
+
+    if ((NULL == context) || (NULL == nrr)) return NULL;
+
+    if (false == reg_match(nrr->regex_pattern, context->_domain_name)) {
+        has_regex_match = true;
+    }
+
+    return has_regex_match;
+}
+
+static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool should_remove = true;
+
+    if ((NULL == context) || (NULL == nrr)) return NULL;
+
+    if (false == has_appropriate_services(context, nrr)) {
+        /* Excluding this peer due to not handling desired services */
+        should_remove = true;
+    } else if ((true == has_replace_no_regex(context, nrr)) ||
+               (true == has_regex_match(context, nrr))) {
+        /* It has a replacement field AND no regex field */
+        /* OR it has a regex field that matches the domain name */
+        should_remove = true;
+    } else {
         /* This peer provides requested target node & service */
         should_remove = false;
-    }
-    else {
-        /* Excluding this peer due to not handling desired service */
-        should_remove = true;
     }
 
     return should_remove;
 }
 
-static void transform_domain_name(naptr_resource_record *nrr, char * dname, size_t max_dname_sz) {
+/*
+ * Example (regex replace):
+ *   Input:
+ *     nrr->regex_pattern = "([a-z0-9]+)(..*)"
+ *     nrr->regex_replace = "\\1.apn.epc.mnc999.mcc999.3gppnetwork.org"
+ *     nrr->replacement = "."
+ *     dname = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com"
+ *   Output:
+ *     dname = "mms.apn.epc.mnc999.mcc999.3gppnetwork.org"
+ * 
+ * Example (replace):
+ *   Input:
+ *     nrr->regex_pattern = ""
+ *     nrr->regex_replace = ""
+ *     nrr->replacement = "www.google.com"
+ *     dname = "mms.apn.epc.mnc001.mcc001.3gppnetwork.org.nickvsnetworking.com"
+ *   Output:
+ *     dname = "www.google.com"
+ * 
+ * Notes:
+ *   If any of the pointers are NULL then the function will immediately return
+ *   without making any changes.
+ *   We assume that all strings (char*) are correctly terminated.
+ *   Assuming that dname is of size DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN.
+ */
+static void transform_domain_name(naptr_resource_record *nrr, char * dname) {
     if ((NULL == nrr) || (NULL == dname)) return;
 
     /* If a Regex Replaces is set on the DNS entry then evaluate it and apply it */
     if ((0 < strlen(nrr->regex_pattern)) &&
         (0 < strlen(nrr->regex_replace))) {
         int reg_replace_res;
-        char temp[MAX_DOMAIN_NAME_STR_LEN] = "";
+        char temp[DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN] = "";
 
-        reg_replace_res = reg_replace(nrr->regex_pattern, nrr->regex_replace, dname, temp, MAX_DOMAIN_NAME_STR_LEN);
+        reg_replace_res = reg_replace(nrr->regex_pattern, nrr->regex_replace, dname, temp, DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN);
 
         if (1 == reg_replace_res) {
-            strcpy(dname, temp);
+            strncpy(dname, temp, DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN - 1);
         } else {
             printf("Failed to preform regex replace!\n");
         }
     } else if (0 != strcmp(nrr->replacement, ".")) {
-        strncpy(dname, nrr->replacement, max_dname_sz);
+        strncpy(dname, nrr->replacement, DNS_RESOLVER_MAX_DOMAIN_NAME_STR_LEN - 1);
     } else {
         /* No changes made to domain name */
     }
 }
 
-static int record_lookup(char lookup_type, char * dname, char * buf, size_t buf_sz) {
-    int resolv_lookup_type; 
-    ns_msg handle;
-    ns_rr record;
-    unsigned char response[NS_PACKETSZ];
+/* TODO this should be changed and moved to a more appropriate area. 
+ * It should return a query result and not a single IP.
+ * It should also be renamed to a_query or srv_query */
+static int type_ip_query(char lookup_type, char * dname, char * buf, size_t buf_sz) {
     int ip_count = 0;
+    int resolv_lookup_type; 
+    unsigned char answer[MAX_ANSWER_BYTES];
+    ns_rr record;
+    ns_msg handle;
 
-    if ('A' == lookup_type) {
+    if ((NULL == dname) || (NULL == buf)) return 0;
+
+    if (('A' == lookup_type) || (0 == lookup_type)) {
         resolv_lookup_type = T_A; 
+        // return 0; // temp, remove me after building SRV stuff
     } else if ('S' == lookup_type) {
         resolv_lookup_type = T_SRV; 
     } else {
@@ -201,16 +323,17 @@ static int record_lookup(char lookup_type, char * dname, char * buf, size_t buf_
         return 0;
     }
 
-    int response_length, i, result;
+    int bytes_received, i, result;
 
     // Send DNS query for A record type
-    response_length = res_query(dname, C_IN, resolv_lookup_type, response, NS_PACKETSZ);
-    if (response_length < 0) {
+    bytes_received = res_query(dname, C_IN, resolv_lookup_type, answer, MAX_ANSWER_BYTES);
+    printf("[%c-lookup] Query for '%s' resulted in %i bytes received\n", lookup_type, dname, bytes_received);
+    if (bytes_received < 0) {
         return 0;
     }
 
     // Initialize message handle
-    result = ns_initparse(response, response_length, &handle);
+    result = ns_initparse(answer, bytes_received, &handle);
     if (result < 0) {
         perror("ns_initparse");
         return 0;
@@ -229,6 +352,7 @@ static int record_lookup(char lookup_type, char * dname, char * buf, size_t buf_
             ++ip_count;
         } else if (ns_rr_type(record) == T_SRV) {
             /* TODO */
+            /* This will have weights and stuff then balance some stuff */
             printf("SRV lookup is currently not implemented!\n");
         }
     }

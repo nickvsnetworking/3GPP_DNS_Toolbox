@@ -7,32 +7,32 @@ enum { SR_RE_MAX_MATCH = 6 };
 
 
 static int replace(regmatch_t* pmatch, char* string, char* replacement, char* buf, size_t buf_sz);
+static int get_reg_match(char const *pattern, char const *string, regmatch_t *pmatch);
 
+bool reg_match(char const *pattern, char const *string) {
+	bool has_match = false;
+	
+	regmatch_t pmatch[SR_RE_MAX_MATCH];
 
-int reg_match(char *pattern, char *string, regmatch_t *pmatch)
-{
-	regex_t preg;
+	if (0 == get_reg_match(pattern, string, &(pmatch[0]))) {
+		has_match = true;
+	}
 
-	if (regcomp(&preg, pattern, REG_EXTENDED | REG_NEWLINE)) {
-		return -1;
-	}
-	if (preg.re_nsub > SR_RE_MAX_MATCH) {
-		regfree(&preg);
-		return -2;
-	}
-	if (regexec(&preg, string, SR_RE_MAX_MATCH, pmatch, 0)) {
-		regfree(&preg);
-		return -3;
-	}
-	regfree(&preg);
-	return 0;
+	return has_match;
 }
 
 int reg_replace(char *pattern, char *replacement, char *string, char *buf, size_t buf_sz)
 {
 	regmatch_t pmatch[SR_RE_MAX_MATCH];
 
-	if (reg_match(pattern, string, &(pmatch[0]))) {
+    if ((NULL == pattern)     ||
+        (NULL == replacement) ||
+        (NULL == string)      ||
+        (NULL == buf)) {
+        return 0;
+    }
+
+	if (get_reg_match(pattern, string, &(pmatch[0]))) {
 		return -1;
 	}
 
@@ -48,7 +48,14 @@ static int replace(regmatch_t* pmatch, char* string, char* replacement, char* bu
     int i;
     int j;
     int digit;
-    int size;;
+    int size;
+
+    if ((NULL == pmatch)      ||
+        (NULL == string)      ||
+        (NULL == replacement) ||
+        (NULL == buf)) {
+        return 0;
+    }
 
 	len = strlen(replacement);
 	j = 0;
@@ -86,5 +93,25 @@ static int replace(regmatch_t* pmatch, char* string, char* replacement, char* bu
 			return -4;
 		}
 	}
+
 	return 1;
+}
+
+static int get_reg_match(char const *pattern, char const *string, regmatch_t *pmatch)
+{
+	regex_t preg;
+
+	if (regcomp(&preg, pattern, REG_EXTENDED | REG_NEWLINE)) {
+		return -1;
+	}
+	if (preg.re_nsub > SR_RE_MAX_MATCH) {
+		regfree(&preg);
+		return -2;
+	}
+	if (regexec(&preg, string, SR_RE_MAX_MATCH, pmatch, 0)) {
+		regfree(&preg);
+		return -3;
+	}
+	regfree(&preg);
+	return 0;
 }

@@ -3,10 +3,11 @@
 
 
 #include <regex.h>
+#include <stdbool.h>
 
 
 /*! \brief Match pattern against string and store result in pmatch */
-int reg_match(char *pattern, char *string, regmatch_t *pmatch);
+bool reg_match(char const *pattern, char const *string);
 
 
 /*! \brief Match pattern against string and, if match succeeds, and replace string
