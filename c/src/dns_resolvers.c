@@ -227,7 +227,7 @@ static bool has_regex_match(ResolverContext const * const context, naptr_resourc
 
     if (false == reg_match(nrr->regex_pattern, context->_domain_name)) {
         has_regex_match = true;
-        printf("has a regex match!\n")
+        printf("has a regex match!\n");
     }
     else 
     {
