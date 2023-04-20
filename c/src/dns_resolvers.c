@@ -195,6 +195,10 @@ static bool has_replace_no_regex(ResolverContext const * const context, naptr_re
 
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
+
+    printf("replacement field is '%s'\n", nrr->replacement);
+    printf("pattern field is '%s'\n", nrr->regex_pattern);
+
     /* Has replacement field */
     if ((0 < strlen(nrr->replacement)) &&
         (0 != strcmp(nrr->replacement, "."))) {
@@ -240,8 +244,8 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
         /* Excluding this peer due to not handling desired services */
         printf("Excluding this peer due to not handling desired services\n");
         should_remove = true;
-    } else if ((true == has_replace_no_regex(context, nrr)) ||
-               (true == has_regex_match(context, nrr))) {
+    } else if ((false == has_replace_no_regex(context, nrr)) ||
+               (false == has_regex_match(context, nrr))) {
         printf("Excluding this peer as it has a replacement field AND no regex field\n");
         printf("OR it has a regex field that matches the domain name\n");
         /* It has a replacement field AND no regex field */
