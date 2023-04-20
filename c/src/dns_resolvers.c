@@ -182,7 +182,10 @@ static bool has_appropriate_services(ResolverContext const * const context, napt
     snprintf(desired_target_string, DESIRED_STR_LEN, "x-3gpp-%s", context->target);
     snprintf(desired_service_string, DESIRED_STR_LEN, "x-%s-%s", context->interface, context->protocol);
 
-    if ((NULL != strstr(nrr->service, desired_service_string)) ||
+    printf("desired_service_string '%s'\n", desired_service_string);
+    printf("desired_target_string '%s'\n", desired_target_string);
+
+    if ((NULL != strstr(nrr->service, desired_service_string)) &&
         (NULL != strstr(nrr->service, desired_target_string))) {
         has_appropriate_services = true;
     }
@@ -209,10 +212,9 @@ static bool has_replace_has_no_regex(ResolverContext const * const context, napt
         if ((0 == strlen(nrr->regex_pattern)) &&
             (0 == strlen(nrr->regex_pattern))) {
             has_replace_has_no_regex = true;     
+            printf("Also has no regex field!\n");
         } else 
         {
-            printf("BUT it has a regex field\n");
-
         }
     }
 
@@ -240,9 +242,9 @@ static bool has_regex_match(ResolverContext const * const context, naptr_resourc
 }
 
 static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr) {
-    bool should_remove = true;
+    bool should_remove = false;
 
-    if ((NULL == context) || (NULL == nrr)) return NULL;
+    if ((NULL == context) || (NULL == nrr)) return true;
 
     printf("Testing if we should reject:\n");
     printf("Target '%s'\n", context->target);
@@ -259,18 +261,22 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
         /* Excluding this peer due to not handling desired services */
         printf("Excluding this peer due to not handling desired services\n");
         should_remove = true;
-    } else if ((false == has_replace_has_no_regex(context, nrr)) ||
-               (false == has_regex_match(context, nrr))) {
-        printf("Excluding this peer as it has a replacement field AND no regex field\n");
-        printf("OR it has a regex field that matches the domain name\n");
+    }
+    
+    else if (true == has_replace_has_no_regex(context, nrr)) {
         /* It has a replacement field AND no regex field */
         /* OR it has a regex field that matches the domain name */
-        should_remove = true;
+        should_remove = false;
+    } else if (true == has_regex_match(context, nrr)) {
+        should_remove = false;
     } else {
         /* This peer provides requested target node & service */
-        should_remove = false;
+        printf("Excluding this peer as it has a replacement field AND no regex field\n");
+        should_remove = true;
     }
+    printf("should_remove: %i\n", should_remove);
     printf("\n\n\n");
+
 
     return should_remove;
 }
