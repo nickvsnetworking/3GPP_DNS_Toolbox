@@ -122,7 +122,6 @@ static bool build_domain_name(ResolverContext * const context) {
 
 /* 
 squeezing into open5gs is still needed
-consult the standards for exclusions if regex is fucked
 SRV will need to be sorted and stuff
 
  */
@@ -139,9 +138,6 @@ static naptr_resource_record * filter_nrrs(ResolverContext const * const context
     while (NULL != nrr) {
         next = nrr->next;
         prev = nrr->prev;
-
-        // if regex doesnt match then maybe remove it?
-        // 
 
         if (should_remove(context, nrr)) {
             naptr_remove_resource_record(nrr);
@@ -174,8 +170,6 @@ static naptr_resource_record * filter_nrrs(ResolverContext const * const context
  *     - It has a regex field that does not match the string
  * 
  */
-
-
 static bool has_appropriate_services(ResolverContext const * const context, naptr_resource_record *nrr) {
     bool has_appropriate_services = false;
     enum { DESIRED_STR_LEN = 128 };
@@ -202,10 +196,6 @@ static bool has_replace_no_regex(ResolverContext const * const context, naptr_re
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
     /* Has replacement field */
-
-    // printf("strlen(nrr->replacement) = %i\n", strlen(nrr->replacement));
-    // printf("strcmp(nrr->replacement, .) = %i\n", strcmp(nrr->replacement, "."));
-
     if ((0 < strlen(nrr->replacement)) &&
         (0 != strcmp(nrr->replacement, "."))) {
 
