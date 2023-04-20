@@ -11,7 +11,6 @@ static int get_reg_match(char const *pattern, char const *string, regmatch_t *pm
 
 bool reg_match(char const *pattern, char const *string) {
 	bool has_match = false;
-	
 	regmatch_t pmatch[SR_RE_MAX_MATCH];
 
 	if (0 == get_reg_match(pattern, string, &(pmatch[0]))) {

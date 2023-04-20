@@ -226,7 +226,7 @@ static bool parse_naptr_resource_record(const unsigned char * buf, uint16_t buf_
     flags_len = buf[bytes_consumed];
     bytes_consumed += FLAGS_LEN_SZ_BYTES;
 
-    /* Assuming that the flag(s) will only be either 'A' or 'S' */
+    /* Assuming that the flag(s) will only be either 'a' or 's' */
     nrr->flag = buf[bytes_consumed];
     bytes_consumed += flags_len;
 

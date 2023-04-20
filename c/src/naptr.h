@@ -3,11 +3,10 @@
 
 #include <arpa/nameser.h>
 
-enum { MAX_FLAGS_STR = 8, // TODO WHAT IS THE ACTUAL MAX?
-       MAX_REGEX_PATTERN_STR = 64,
+enum { MAX_REGEX_PATTERN_STR = 64,
        MAX_REGEX_REPLACE_STR = 64,
        MAX_SERVICE_STR = 128,
-       MAX_REPLACEMENT_STR = NS_MAXDNAME };
+       MAX_REPLACEMENT_STR = 128 };
 
 typedef struct naptr_resource_record {
     struct naptr_resource_record* prev;

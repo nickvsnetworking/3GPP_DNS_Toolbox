@@ -125,13 +125,6 @@ static bool build_domain_name(ResolverContext * const context) {
     return build_success;
 }
 
-
-/* 
-squeezing into open5gs is still needed
-SRV will need to be sorted and stuff
-
- */
-
 /**
  * Cases:
  *   1) If filter results in empty list NULL will be returned
@@ -342,7 +335,13 @@ static void transform_domain_name(naptr_resource_record *nrr, char * dname) {
 
 /* TODO this should be changed and moved to a more appropriate area. 
  * It should return a query result and not a single IP.
- * It should also be renamed to a_query or srv_query */
+ * It should also be renamed to a_query or srv_query 
+ * 
+ * E.g.
+    bool resolve_srv(ResolverContext * const context, char *buf, size_t buf_sz) {
+    bool resolve_a(ResolverContext * const context, char *buf, size_t buf_sz) {
+ * 
+ * */
 static int type_ip_query(char lookup_type, char * dname, char * buf, size_t buf_sz) {
     int ip_count = 0;
     int resolv_lookup_type; 

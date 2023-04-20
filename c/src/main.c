@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
         printf("Not enough arguments for cli runs!\n");
         printf("Expecting something like this:\n");
         printf("\t./main \"<apn>\" \"<mnc>\" \"<mcc>\" \"<domain_suffix>\" \"<target>\" \"<interface>\" \"<protocol>\"\n");
-        printf("\t./main \"mms\" \"030\" \"362\" \"3gppnetwork.org\" \"pgw\" \"s5\" \"gtp\"\n");
+        printf("\t./main \"mms\" \"030\" \"362\" \"3gppnetwork.org\" \"pgw\" \"s5\" \"gtp\"\n\n");
 
 
         printf("Running default...\n");
