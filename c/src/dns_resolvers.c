@@ -161,27 +161,7 @@ static naptr_resource_record * filter_nrrs(ResolverContext const * const context
 }
 
 
-/*
- * RFC 2915 (4. The Basic NAPTR Algorithm)
- * 
- * NAPTR records for this key are retrieved, those with unknown Flags or
- * inappropriate Services are discarded and the remaining records are
- * sorted by their Order field.  Within each value of Order, the records
- * are further sorted by the Preferences field.
- * 
- * The records are examined in sorted order until a matching record is
- * found.  A record is considered a match iff:
- *   - it has a Replacement field value instead of a Regexp field value.
- *   - or the Regexp field matches the string held by the client.
- * 
- * TLDR:
- *   We only keep if:
- *     - Known flag
- *     - Appropriate services
- *     - It has a replacement field AND no regex field
- *     - It has a regex field that does not match the string
- * 
- */
+
 static bool has_appropriate_services(ResolverContext const * const context, naptr_resource_record *nrr) {
     bool has_appropriate_services = false;
     enum { DESIRED_STR_LEN = 128 };
@@ -251,6 +231,27 @@ static bool has_regex_match(ResolverContext const * const context, naptr_resourc
     return has_regex_match;
 }
 
+/*
+ * RFC 2915 (4. The Basic NAPTR Algorithm)
+ * 
+ * NAPTR records for this key are retrieved, those with unknown Flags or
+ * inappropriate Services are discarded and the remaining records are
+ * sorted by their Order field.  Within each value of Order, the records
+ * are further sorted by the Preferences field.
+ * 
+ * The records are examined in sorted order until a matching record is
+ * found.  A record is considered a match iff:
+ *   - it has a Replacement field value instead of a Regexp field value.
+ *   - or the Regexp field matches the string held by the client.
+ * 
+ * TLDR:
+ *   We only keep if:
+ *     - Known flag
+ *     - Appropriate services
+ *     - It has a replacement field AND no regex field
+ *     - It has a regex field that does not match the string
+ * 
+ */
 static bool should_remove(ResolverContext const * const context, naptr_resource_record *nrr) {
     bool should_remove = false;
 
