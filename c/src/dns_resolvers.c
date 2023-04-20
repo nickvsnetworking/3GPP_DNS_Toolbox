@@ -341,10 +341,10 @@ static int type_ip_query(char lookup_type, char * dname, char * buf, size_t buf_
 
     if ((NULL == dname) || (NULL == buf)) return 0;
 
-    if (('A' == lookup_type) || (0 == lookup_type)) {
+    if (('a' == lookup_type) || (0 == lookup_type)) {
         resolv_lookup_type = T_A; 
         // return 0; // temp, remove me after building SRV stuff
-    } else if ('S' == lookup_type) {
+    } else if ('s' == lookup_type) {
         resolv_lookup_type = T_SRV; 
     } else {
         printf("Unsupported lookup type");
