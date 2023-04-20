@@ -245,8 +245,14 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
     printf("Testing if we should reject:\n");
+    printf("Target '%s'\n", context->target);
+    printf("APN '%s'\n", context->apn);
+    printf("interface '%s'\n", context->interface);
+    printf("domain_suffix '%s'\n", context->domain_suffix);
+    printf("mcc '%s'\n", context->mcc);
+    printf("mnc '%s'\n", context->mnc);
+    printf("protocol '%s'\n", context->protocol);
     print_nrr(nrr);
-    printf("\n");
 
 
     if (false == has_appropriate_services(context, nrr)) {
@@ -264,6 +270,7 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
         /* This peer provides requested target node & service */
         should_remove = false;
     }
+    printf("\n\n\n");
 
     return should_remove;
 }
