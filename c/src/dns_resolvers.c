@@ -250,13 +250,13 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
         /* Excluding this peer due to not handling desired services */
         printf("Excluding this peer due to not handling desired services\n");
         should_remove = true;
-    } else if ((false == has_replace_has_no_regex(context, nrr)) ||
-               (false == has_regex_match(context, nrr))) {
+    } else if ((true == has_replace_has_no_regex(context, nrr)) ||
+               (true == has_regex_match(context, nrr))) {
         printf("Excluding this peer as it has a replacement field AND no regex field\n");
         printf("OR it has a regex field that matches the domain name\n");
         /* It has a replacement field AND no regex field */
         /* OR it has a regex field that matches the domain name */
-        should_remove = true;
+        should_remove = false;
     } else {
         /* This peer provides requested target node & service */
         should_remove = false;
