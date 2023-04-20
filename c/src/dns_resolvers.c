@@ -190,8 +190,9 @@ static bool has_appropriate_services(ResolverContext const * const context, napt
     return has_appropriate_services;
 }
 
-static bool has_replace_no_regex(ResolverContext const * const context, naptr_resource_record *nrr) {
-    bool has_replace_no_regex = false;
+/* We want this  */
+static bool has_replace_has_no_regex(ResolverContext const * const context, naptr_resource_record *nrr) {
+    bool has_replace_has_no_regex = false;
 
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
@@ -207,7 +208,7 @@ static bool has_replace_no_regex(ResolverContext const * const context, naptr_re
         /* Has no regex fields */
         if ((0 == strlen(nrr->regex_pattern)) &&
             (0 == strlen(nrr->regex_pattern))) {
-            has_replace_no_regex = true;     
+            has_replace_has_no_regex = true;     
         } else 
         {
             printf("BUT it has a regex field\n");
@@ -215,7 +216,7 @@ static bool has_replace_no_regex(ResolverContext const * const context, naptr_re
         }
     }
 
-    return has_replace_no_regex;
+    return has_replace_has_no_regex;
 }
 
 
@@ -240,11 +241,16 @@ static bool should_remove(ResolverContext const * const context, naptr_resource_
 
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
+    printf("Testing if we should reject:\n");
+    print_nrr(nrr);
+    printf("\n");
+
+
     if (false == has_appropriate_services(context, nrr)) {
         /* Excluding this peer due to not handling desired services */
         printf("Excluding this peer due to not handling desired services\n");
         should_remove = true;
-    } else if ((false == has_replace_no_regex(context, nrr)) ||
+    } else if ((false == has_replace_has_no_regex(context, nrr)) ||
                (false == has_regex_match(context, nrr))) {
         printf("Excluding this peer as it has a replacement field AND no regex field\n");
         printf("OR it has a regex field that matches the domain name\n");
