@@ -198,11 +198,16 @@ static bool has_replace_no_regex(ResolverContext const * const context, naptr_re
     /* Has replacement field */
     if ((0 < strlen(nrr->replacement)) &&
         (0 != strcmp(nrr->replacement, "."))) {
+            printf("This one has a replacement field\n");
 
         /* Has no regex fields */
         if ((0 == strlen(nrr->regex_pattern)) &&
             (0 == strlen(nrr->regex_pattern))) {
             has_replace_no_regex = true;     
+        } else 
+        {
+            printf("BUT it has a regex field\n");
+
         }
     }
 
@@ -217,6 +222,10 @@ static bool has_regex_match(ResolverContext const * const context, naptr_resourc
 
     if (false == reg_match(nrr->regex_pattern, context->_domain_name)) {
         has_regex_match = true;
+    }
+    else 
+    {
+        printf("regex failed to match!\n");
     }
 
     return has_regex_match;
