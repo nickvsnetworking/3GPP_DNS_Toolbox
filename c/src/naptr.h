@@ -29,7 +29,7 @@ naptr_resource_record * naptr_sort(naptr_resource_record **head);
 
 naptr_resource_record * naptr_list_head(naptr_resource_record * nrr);
 
-void naptr_remove_resource_record(naptr_resource_record * nrr);
+naptr_resource_record * naptr_remove_resource_record(naptr_resource_record * nrr);
 
 void naptr_free_resource_record_list(naptr_resource_record * nrr);
 

@@ -60,16 +60,22 @@ bool resolve_naptr(ResolverContext * const context, char *buf, size_t buf_sz) {
     if (NULL == nrr_list) return false;
 
     /* Remove all the NRRs that don't provide the desired service */
+    printf("before filter_nrrs` %i\n", naptr_resource_record_list_count(nrr_list));
     nrr_list = filter_nrrs(context, nrr_list);
 
     /* Sort the NRRs so that we can resolve them in order of priority */
+    printf("before naptr_list_head %i\n", naptr_resource_record_list_count(nrr_list));
     nrr_list = naptr_list_head(nrr_list);
+    printf("before sort count %i\n", naptr_resource_record_list_count(nrr_list));
     nrr = naptr_sort(&nrr_list);
+    printf("after sort count %i\n", naptr_resource_record_list_count(nrr));
+
 
     while (nrr != NULL) {
         /* Update domain name */
         transform_domain_name(nrr, context->_domain_name);
 
+        printf("Doing '%c' lookup for '%s'\n", nrr->flag, context->_domain_name);
         /* Go through the NRRs until we get an IP */
         int num_ips = type_ip_query(nrr->flag, context->_domain_name, buf, buf_sz);
 
@@ -126,26 +132,32 @@ SRV will need to be sorted and stuff
 
  */
 
-// todo this needs a little work... itll probably bug out if we try filter with 1 element in the list
+/**
+ * Cases:
+ *   1) If filter results in empty list NULL will be returned
+ *   2) If filter results in non-empty list then the last node
+ *      is returned.
+ */
 static naptr_resource_record * filter_nrrs(ResolverContext const * const context, naptr_resource_record *nrr) {
+    naptr_resource_record *prev = NULL;
+    naptr_resource_record *next = NULL;
 
     if ((NULL == context) || (NULL == nrr)) return NULL;
 
     nrr = naptr_list_head(nrr);
-    naptr_resource_record *next = nrr->next;
-    naptr_resource_record *prev = nrr->prev;
 
     while (NULL != nrr) {
         next = nrr->next;
-        prev = nrr->prev;
 
         if (should_remove(context, nrr)) {
-            naptr_remove_resource_record(nrr);
+            nrr = naptr_remove_resource_record(nrr);
         }
+
+        prev = nrr;
         nrr = next;
     }
 
-    return naptr_list_head(prev);
+    return prev;
 }
 
 
@@ -213,8 +225,6 @@ static bool has_replace_has_no_regex(ResolverContext const * const context, napt
             (0 == strlen(nrr->regex_pattern))) {
             has_replace_has_no_regex = true;     
             printf("Also has no regex field!\n");
-        } else 
-        {
         }
     }
 

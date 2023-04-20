@@ -31,6 +31,8 @@ int main() {
     // printf("========================================\n");
     // printf("The the final resolved IP is '%s'\n", ipv4);
 
+// todo make these a cmd args
+
     resolve_naptr(&context2, ipv4, INET_ADDRSTRLEN);
     printf("========================================\n");
     printf("The the final resolved IP is '%s'\n", ipv4);

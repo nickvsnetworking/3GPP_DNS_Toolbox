@@ -108,21 +108,35 @@ naptr_resource_record * naptr_list_head(naptr_resource_record * nrr) {
     return nrr;
 }
 
-void naptr_remove_resource_record(naptr_resource_record * nrr) {
-    if (NULL == nrr) return;
+/*
+ * Cases:
+ *   1) If the parameter is NULL we return NULL.
+ *   2) If we remove the head node we will return the new head node.
+ *   3) If we remove the last node we will return the new last node.
+ *   4) If we remove from a list with only 1 item we will return NULL.
+ *   5) If we remove a node that is between two other we will return the
+ *      removed nodes next node (the node at the index of the removed one)
+ */
+naptr_resource_record * naptr_remove_resource_record(naptr_resource_record * nrr) {
+    if (NULL == nrr) return NULL;
 
+    naptr_resource_record *res = NULL;
     naptr_resource_record *prev = nrr->prev;
     naptr_resource_record *next = nrr->next;
 
     if (NULL != prev) {
         prev->next = next;
+        res = prev;
     }
 
     if (NULL != next) {
         next->prev = prev;
+        res = next;
     }
 
     free(nrr);
+
+    return res;
 }
 
 void naptr_free_resource_record_list(naptr_resource_record * nrr) {
